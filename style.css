@@ -1,0 +1,62 @@
+/* Before & After — Custom Streamlit CSS */
+
+/* Hide Streamlit branding */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+
+/* Reduce top padding */
+.block-container {
+    padding-top: 2rem !important;
+    padding-bottom: 1rem !important;
+}
+
+/* Upload dropzone styling */
+[data-testid="stFileUploader"] {
+    border: 2px dashed rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    padding: 0.8rem;
+    transition: border-color 0.2s ease;
+}
+[data-testid="stFileUploader"]:hover {
+    border-color: rgba(200, 255, 0, 0.35);
+}
+
+/* Rounded corners on preview images */
+[data-testid="stImage"] img {
+    border-radius: 8px;
+}
+
+/* Download button emphasis */
+[data-testid="stDownloadButton"] button {
+    font-weight: 600 !important;
+    border-radius: 8px !important;
+    padding: 0.65rem 1.2rem !important;
+    transition: all 0.15s ease;
+}
+
+/* Expander styling */
+[data-testid="stExpander"] {
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+}
+
+/* Sidebar spacing */
+section[data-testid="stSidebar"] > div {
+    padding-top: 1.5rem;
+}
+
+/* Radio button row compact */
+[data-testid="stRadio"] > div {
+    gap: 0.3rem;
+}
+
+/* Divider subtle */
+hr {
+    border-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Spinner area */
+[data-testid="stSpinner"] {
+    margin: 1rem 0;
+}

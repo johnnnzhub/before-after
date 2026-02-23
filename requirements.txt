@@ -1,7 +1,6 @@
 streamlit>=1.40.0
-mediapipe>=0.10.18
-opencv-python-headless>=4.10.0
-numpy>=1.26.0
+mediapipe>=0.10.14
+numpy>=1.26.0,<2.0
 Pillow>=10.0.0
 pillow-heif>=0.16.0
 streamlit-image-comparison>=0.0.4

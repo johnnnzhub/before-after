@@ -1,5 +1,7 @@
 """Estimativa de percentual de gordura corporal via landmarks MediaPipe."""
 
+from __future__ import annotations
+
 import math
 
 import cv2

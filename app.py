@@ -1,5 +1,7 @@
 """Before/After Body Comparison — Streamlit UI."""
 
+from __future__ import annotations
+
 import io
 from pathlib import Path
 
@@ -10,8 +12,9 @@ from PIL import Image
 from streamlit_image_comparison import image_comparison
 
 from aligner import BodyAligner, draw_landmarks_overlay
-from bodyfat import estimate_body_fat, draw_measurement_overlay, BF_REFERENCE_TABLE
-from composer import OutputTemplate, compose  # noqa: F401
+from bodyfat import estimate_body_fat
+from composer import OutputTemplate, compose
+from ui_components import render_bodyfat_section
 from utils import load_image, match_brightness
 
 # ---------------------------------------------------------------------------
@@ -25,6 +28,20 @@ if _css_path.exists():
 
 st.title("Before & After")
 st.caption("by #cobaiateam")
+
+# ---------------------------------------------------------------------------
+# Cached resources
+# ---------------------------------------------------------------------------
+@st.cache_resource
+def _get_aligner():
+    """Load BodyAligner once — persists across reruns."""
+    return BodyAligner()
+
+
+def _file_cache_key(f) -> str:
+    """Stable key from uploaded file metadata."""
+    return f"{f.name}_{f.size}" if f else ""
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -47,7 +64,7 @@ TEMPLATE_OPTIONS = {
 
 
 # ---------------------------------------------------------------------------
-# Helper functions (defined BEFORE main flow)
+# Helper
 # ---------------------------------------------------------------------------
 def _preview(uploaded_file, caption: str):
     """Load image safely and show preview. Returns BGR numpy or None."""
@@ -55,71 +72,6 @@ def _preview(uploaded_file, caption: str):
     if img is not None:
         st.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), caption=caption, use_container_width=True)
     return img
-
-
-def _render_bf_card(label, bf_data):
-    cat = bf_data["category"]
-    bf_pct = bf_data["ensemble_bf"]
-    color_map = {"green": "🟢", "yellow": "🟡", "red": "🔴", "blue": "🔵"}
-    icon = color_map.get(cat["color"], "⚪")
-
-    st.metric(label=label, value=f"{bf_pct}%")
-    st.write(f"{icon} {cat['label']}")
-
-    if bf_data["navy_bf"]:
-        st.caption(f"Navy: {bf_data['navy_bf']}% | Deurenberg: {bf_data['deurenberg_bf']}% | BMI: {bf_data['bmi']}")
-    else:
-        st.caption(f"Deurenberg: {bf_data['deurenberg_bf']}% | BMI: {bf_data['bmi']}")
-
-    m = bf_data["measurements"]
-    st.caption(f"Cintura: {m['waist_circ_cm']}cm | Quadril: {m['hip_circ_cm']}cm | Pescoco: {m['neck_circ_cm']}cm")
-
-
-def _render_bodyfat_section(result, before_img, after_img, bf_before, bf_after, sex):
-    """Render body fat details inside an expander."""
-    col1, col2 = st.columns(2)
-
-    if bf_before:
-        with col1:
-            _render_bf_card("Antes", bf_before)
-    if bf_after:
-        with col2:
-            _render_bf_card("Depois", bf_after)
-
-    # Delta
-    if bf_before and bf_after:
-        delta = bf_after["ensemble_bf"] - bf_before["ensemble_bf"]
-        delta_str = f"{delta:+.1f}%"
-        if delta < 0:
-            st.success(f"Variacao: {delta_str} de gordura corporal")
-        elif delta > 0:
-            st.warning(f"Variacao: {delta_str} de gordura corporal")
-        else:
-            st.info("Sem variacao detectada")
-
-    # Measurement overlay
-    st.caption("Medicoes")
-    bh, bw = before_img.shape[:2]
-    ah, aw = after_img.shape[:2]
-    m1, m2 = st.columns(2)
-    if bf_before and result.landmarks_before is not None:
-        with m1:
-            ov = draw_measurement_overlay(before_img, result.landmarks_before, bw, bh)
-            st.image(cv2.cvtColor(ov, cv2.COLOR_BGR2RGB), caption="Antes", use_container_width=True)
-    if bf_after and result.landmarks_after is not None:
-        with m2:
-            ov = draw_measurement_overlay(after_img, result.landmarks_after, aw, ah)
-            st.image(cv2.cvtColor(ov, cv2.COLOR_BGR2RGB), caption="Depois", use_container_width=True)
-
-    # Reference table
-    with st.expander("Tabela de referencia"):
-        ref = BF_REFERENCE_TABLE.get(sex, BF_REFERENCE_TABLE["M"])
-        st.table({"Categoria": [r[0] for r in ref], "Faixa": [r[1] for r in ref]})
-
-    st.caption(
-        "Estimativa baseada em formulas antropometricas (Navy + Deurenberg). "
-        "Precisao: ~4-6% vs DEXA. Para avaliacao clinica, consulte um profissional."
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +140,11 @@ if multi_view:
                 af = st.file_uploader("Depois", type=FILE_TYPES, key=f"{view['key']}_after")
                 af_img = _preview(af, "Depois") if af else None
             if bf_img is not None and af_img is not None:
-                uploads[view["key"]] = {"before_img": bf_img, "after_img": af_img, "label": view["label"]}
+                uploads[view["key"]] = {
+                    "before_img": bf_img, "after_img": af_img,
+                    "label": view["label"],
+                    "cache_key": f"{view['key']}_{_file_cache_key(bf)}_{_file_cache_key(af)}",
+                }
 else:
     c1, c2 = st.columns(2)
     with c1:
@@ -198,10 +154,14 @@ else:
         after_file = st.file_uploader("Depois", type=FILE_TYPES, key="single_after")
         after_img_preview = _preview(after_file, "Depois") if after_file else None
     if before_img_preview is not None and after_img_preview is not None:
-        uploads["front"] = {"before_img": before_img_preview, "after_img": after_img_preview, "label": "Frente"}
+        uploads["front"] = {
+            "before_img": before_img_preview, "after_img": after_img_preview,
+            "label": "Frente",
+            "cache_key": f"front_{_file_cache_key(before_file)}_{_file_cache_key(after_file)}",
+        }
 
 # ---------------------------------------------------------------------------
-# Auto-process
+# Auto-process (with session_state cache)
 # ---------------------------------------------------------------------------
 if not uploads:
     st.info("Envie pelo menos 1 par de fotos (antes + depois).")
@@ -209,7 +169,7 @@ if not uploads:
 
 st.divider()
 
-aligner = BodyAligner()
+aligner = _get_aligner()
 
 results = {}
 for view_key, data in uploads.items():
@@ -220,19 +180,26 @@ for view_key, data in uploads.items():
         st.error(f"Erro ao carregar imagem ({data['label']}). Tente outro formato.")
         continue
 
-    # Color matching
-    if color_match:
-        after_img = match_brightness(after_img, before_img)
+    # Cache key includes color_match because brightness affects alignment input
+    full_key = f"align_{data['cache_key']}_{color_match}"
 
-    with st.spinner(f"Alinhando {data['label']}..."):
-        result = aligner.align(before_img, after_img)
+    if full_key in st.session_state:
+        results[view_key] = st.session_state[full_key]
+    else:
+        if color_match:
+            after_img = match_brightness(after_img, before_img)
 
-    results[view_key] = {
-        "result": result,
-        "before_img": before_img,
-        "after_img": after_img,
-        "label": data["label"],
-    }
+        with st.spinner(f"Alinhando {data['label']}..."):
+            result = aligner.align(before_img, after_img)
+
+        entry = {
+            "result": result,
+            "before_img": before_img,
+            "after_img": after_img,
+            "label": data["label"],
+        }
+        st.session_state[full_key] = entry
+        results[view_key] = entry
 
 if not results:
     st.stop()
@@ -310,7 +277,7 @@ for view_key, container in containers.items():
         st.image(output_img, use_container_width=True)
 
         buf = io.BytesIO()
-        output_img.save(buf, format="PNG", quality=95)
+        output_img.save(buf, format="PNG")
 
         st.download_button(
             label="Baixar foto",
@@ -325,7 +292,7 @@ for view_key, container in containers.items():
         # --- Body fat details (expandable) ---
         if bf_enabled and (bf_data_before or bf_data_after):
             with st.expander("% Gordura corporal"):
-                _render_bodyfat_section(
+                render_bodyfat_section(
                     result, before_img, after_img,
                     bf_data_before, bf_data_after, bf_sex,
                 )

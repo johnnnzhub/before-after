@@ -97,6 +97,17 @@ with st.sidebar:
             bf_weight = st.number_input("Peso (kg)", min_value=30.0, max_value=250.0, value=75.0, step=0.5)
 
 # ---------------------------------------------------------------------------
+# Helper: safe preview (handles HEIC + EXIF)
+# ---------------------------------------------------------------------------
+def _preview(uploaded_file, caption: str):
+    """Load image safely and show preview. Returns BGR numpy or None."""
+    img = load_image(uploaded_file)
+    if img is not None:
+        st.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), caption=caption, use_container_width=True)
+    return img
+
+
+# ---------------------------------------------------------------------------
 # Upload section
 # ---------------------------------------------------------------------------
 st.subheader("Envie suas fotos")
@@ -109,26 +120,22 @@ if multi_view:
             c1, c2 = st.columns(2)
             with c1:
                 bf = st.file_uploader("Antes", type=FILE_TYPES, key=f"{view['key']}_before")
-                if bf:
-                    st.image(bf, caption="Antes", use_container_width=True)
+                bf_img = _preview(bf, "Antes") if bf else None
             with c2:
                 af = st.file_uploader("Depois", type=FILE_TYPES, key=f"{view['key']}_after")
-                if af:
-                    st.image(af, caption="Depois", use_container_width=True)
-            if bf and af:
-                uploads[view["key"]] = {"before": bf, "after": af, "label": view["label"]}
+                af_img = _preview(af, "Depois") if af else None
+            if bf_img is not None and af_img is not None:
+                uploads[view["key"]] = {"before_img": bf_img, "after_img": af_img, "label": view["label"]}
 else:
     c1, c2 = st.columns(2)
     with c1:
         before_file = st.file_uploader("Antes", type=FILE_TYPES, key="single_before")
-        if before_file:
-            st.image(before_file, caption="Antes", use_container_width=True)
+        before_img_preview = _preview(before_file, "Antes") if before_file else None
     with c2:
         after_file = st.file_uploader("Depois", type=FILE_TYPES, key="single_after")
-        if after_file:
-            st.image(after_file, caption="Depois", use_container_width=True)
-    if before_file and after_file:
-        uploads["front"] = {"before": before_file, "after": after_file, "label": "Frente"}
+        after_img_preview = _preview(after_file, "Depois") if after_file else None
+    if before_img_preview is not None and after_img_preview is not None:
+        uploads["front"] = {"before_img": before_img_preview, "after_img": after_img_preview, "label": "Frente"}
 
 # ---------------------------------------------------------------------------
 # Auto-process
@@ -143,8 +150,8 @@ aligner = BodyAligner()
 
 results = {}
 for view_key, data in uploads.items():
-    before_img = load_image(data["before"])
-    after_img = load_image(data["after"])
+    before_img = data["before_img"]
+    after_img = data["after_img"]
 
     if before_img is None or after_img is None:
         st.error(f"Erro ao carregar imagem ({data['label']}). Tente outro formato.")

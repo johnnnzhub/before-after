@@ -11,7 +11,7 @@ from streamlit_image_comparison import image_comparison
 
 from aligner import BodyAligner, draw_landmarks_overlay
 from bodyfat import estimate_body_fat, draw_measurement_overlay, BF_REFERENCE_TABLE
-from composer import OutputTemplate, compose, _draw_bf_banner, _bgr_to_pil
+from composer import OutputTemplate, compose  # noqa: F401
 from utils import load_image, match_brightness
 
 # ---------------------------------------------------------------------------
@@ -27,7 +27,7 @@ st.title("Before & After")
 st.caption("by #cobaiateam")
 
 # ---------------------------------------------------------------------------
-# Views definition
+# Constants
 # ---------------------------------------------------------------------------
 VIEWS = [
     {"key": "front", "label": "Frente", "expanded": True},
@@ -36,9 +36,6 @@ VIEWS = [
 ]
 FILE_TYPES = ["jpg", "jpeg", "png", "heic", "webp"]
 
-# ---------------------------------------------------------------------------
-# Template mapping
-# ---------------------------------------------------------------------------
 TEMPLATE_OPTIONS = {
     "Profissional": OutputTemplate.LABELED,
     "Limpo": OutputTemplate.CLEAN,
@@ -47,6 +44,83 @@ TEMPLATE_OPTIONS = {
     "Story 9:16": OutputTemplate.STORY,
     "Com datas": OutputTemplate.WITH_DATES,
 }
+
+
+# ---------------------------------------------------------------------------
+# Helper functions (defined BEFORE main flow)
+# ---------------------------------------------------------------------------
+def _preview(uploaded_file, caption: str):
+    """Load image safely and show preview. Returns BGR numpy or None."""
+    img = load_image(uploaded_file)
+    if img is not None:
+        st.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), caption=caption, use_container_width=True)
+    return img
+
+
+def _render_bf_card(label, bf_data):
+    cat = bf_data["category"]
+    bf_pct = bf_data["ensemble_bf"]
+    color_map = {"green": "🟢", "yellow": "🟡", "red": "🔴", "blue": "🔵"}
+    icon = color_map.get(cat["color"], "⚪")
+
+    st.metric(label=label, value=f"{bf_pct}%")
+    st.write(f"{icon} {cat['label']}")
+
+    if bf_data["navy_bf"]:
+        st.caption(f"Navy: {bf_data['navy_bf']}% | Deurenberg: {bf_data['deurenberg_bf']}% | BMI: {bf_data['bmi']}")
+    else:
+        st.caption(f"Deurenberg: {bf_data['deurenberg_bf']}% | BMI: {bf_data['bmi']}")
+
+    m = bf_data["measurements"]
+    st.caption(f"Cintura: {m['waist_circ_cm']}cm | Quadril: {m['hip_circ_cm']}cm | Pescoco: {m['neck_circ_cm']}cm")
+
+
+def _render_bodyfat_section(result, before_img, after_img, bf_before, bf_after, sex):
+    """Render body fat details inside an expander."""
+    col1, col2 = st.columns(2)
+
+    if bf_before:
+        with col1:
+            _render_bf_card("Antes", bf_before)
+    if bf_after:
+        with col2:
+            _render_bf_card("Depois", bf_after)
+
+    # Delta
+    if bf_before and bf_after:
+        delta = bf_after["ensemble_bf"] - bf_before["ensemble_bf"]
+        delta_str = f"{delta:+.1f}%"
+        if delta < 0:
+            st.success(f"Variacao: {delta_str} de gordura corporal")
+        elif delta > 0:
+            st.warning(f"Variacao: {delta_str} de gordura corporal")
+        else:
+            st.info("Sem variacao detectada")
+
+    # Measurement overlay
+    st.caption("Medicoes")
+    bh, bw = before_img.shape[:2]
+    ah, aw = after_img.shape[:2]
+    m1, m2 = st.columns(2)
+    if bf_before and result.landmarks_before is not None:
+        with m1:
+            ov = draw_measurement_overlay(before_img, result.landmarks_before, bw, bh)
+            st.image(cv2.cvtColor(ov, cv2.COLOR_BGR2RGB), caption="Antes", use_container_width=True)
+    if bf_after and result.landmarks_after is not None:
+        with m2:
+            ov = draw_measurement_overlay(after_img, result.landmarks_after, aw, ah)
+            st.image(cv2.cvtColor(ov, cv2.COLOR_BGR2RGB), caption="Depois", use_container_width=True)
+
+    # Reference table
+    with st.expander("Tabela de referencia"):
+        ref = BF_REFERENCE_TABLE.get(sex, BF_REFERENCE_TABLE["M"])
+        st.table({"Categoria": [r[0] for r in ref], "Faixa": [r[1] for r in ref]})
+
+    st.caption(
+        "Estimativa baseada em formulas antropometricas (Navy + Deurenberg). "
+        "Precisao: ~4-6% vs DEXA. Para avaliacao clinica, consulte um profissional."
+    )
+
 
 # ---------------------------------------------------------------------------
 # Sidebar
@@ -95,17 +169,6 @@ with st.sidebar:
             bf_age = st.number_input("Idade", min_value=10, max_value=100, value=30)
             bf_height = st.number_input("Altura (cm)", min_value=100.0, max_value=250.0, value=175.0, step=0.5)
             bf_weight = st.number_input("Peso (kg)", min_value=30.0, max_value=250.0, value=75.0, step=0.5)
-
-# ---------------------------------------------------------------------------
-# Helper: safe preview (handles HEIC + EXIF)
-# ---------------------------------------------------------------------------
-def _preview(uploaded_file, caption: str):
-    """Load image safely and show preview. Returns BGR numpy or None."""
-    img = load_image(uploaded_file)
-    if img is not None:
-        st.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), caption=caption, use_container_width=True)
-    return img
-
 
 # ---------------------------------------------------------------------------
 # Upload section
@@ -218,7 +281,7 @@ for view_key, container in containers.items():
         # --- Compose & download ---
         st.subheader("Baixar")
 
-        # Body fat data (if enabled)
+        # Body fat data (if enabled) — only "depois" goes on the photo
         bf_data_before = None
         bf_data_after = None
         if bf_enabled:
@@ -241,7 +304,6 @@ for view_key, container in containers.items():
             label_after=label_after,
             date_before=date_before if add_dates else None,
             date_after=date_after if add_dates else None,
-            bf_before=bf_data_before if bf_enabled else None,
             bf_after=bf_data_after if bf_enabled else None,
         )
 
@@ -264,8 +326,8 @@ for view_key, container in containers.items():
         if bf_enabled and (bf_data_before or bf_data_after):
             with st.expander("% Gordura corporal"):
                 _render_bodyfat_section(
-                    result, before_img, after_img, view_key,
-                    bf_data_before, bf_data_after,
+                    result, before_img, after_img,
+                    bf_data_before, bf_data_after, bf_sex,
                 )
 
         # --- Debug (expandable) ---
@@ -280,71 +342,3 @@ for view_key, container in containers.items():
                     st.image(cv2.cvtColor(ov, cv2.COLOR_BGR2RGB), caption="Depois", use_container_width=True)
             else:
                 st.info("Landmarks nao disponiveis (pose nao detectada).")
-
-
-# ---------------------------------------------------------------------------
-# Body fat helper
-# ---------------------------------------------------------------------------
-def _render_bodyfat_section(result, before_img, after_img, view_key, bf_before, bf_after):
-    """Render body fat details inside an expander."""
-    col1, col2 = st.columns(2)
-
-    if bf_before:
-        with col1:
-            _render_bf_card("Antes", bf_before)
-    if bf_after:
-        with col2:
-            _render_bf_card("Depois", bf_after)
-
-    # Delta
-    if bf_before and bf_after:
-        delta = bf_after["ensemble_bf"] - bf_before["ensemble_bf"]
-        delta_str = f"{delta:+.1f}%"
-        if delta < 0:
-            st.success(f"Variacao: {delta_str} de gordura corporal")
-        elif delta > 0:
-            st.warning(f"Variacao: {delta_str} de gordura corporal")
-        else:
-            st.info("Sem variacao detectada")
-
-    # Measurement overlay
-    st.caption("Medicoes")
-    bh, bw = before_img.shape[:2]
-    ah, aw = after_img.shape[:2]
-    m1, m2 = st.columns(2)
-    if bf_before and result.landmarks_before is not None:
-        with m1:
-            ov = draw_measurement_overlay(before_img, result.landmarks_before, bw, bh)
-            st.image(cv2.cvtColor(ov, cv2.COLOR_BGR2RGB), caption="Antes", use_container_width=True)
-    if bf_after and result.landmarks_after is not None:
-        with m2:
-            ov = draw_measurement_overlay(after_img, result.landmarks_after, aw, ah)
-            st.image(cv2.cvtColor(ov, cv2.COLOR_BGR2RGB), caption="Depois", use_container_width=True)
-
-    # Reference table
-    with st.expander("Tabela de referencia"):
-        ref = BF_REFERENCE_TABLE.get(bf_sex, BF_REFERENCE_TABLE["M"])
-        st.table({"Categoria": [r[0] for r in ref], "Faixa": [r[1] for r in ref]})
-
-    st.caption(
-        "Estimativa baseada em formulas antropometricas (Navy + Deurenberg). "
-        "Precisao: ~4-6% vs DEXA. Para avaliacao clinica, consulte um profissional."
-    )
-
-
-def _render_bf_card(label, bf_data):
-    cat = bf_data["category"]
-    bf_pct = bf_data["ensemble_bf"]
-    color_map = {"green": "🟢", "yellow": "🟡", "red": "🔴", "blue": "🔵"}
-    icon = color_map.get(cat["color"], "⚪")
-
-    st.metric(label=label, value=f"{bf_pct}%")
-    st.write(f"{icon} {cat['label']}")
-
-    if bf_data["navy_bf"]:
-        st.caption(f"Navy: {bf_data['navy_bf']}% | Deurenberg: {bf_data['deurenberg_bf']}% | BMI: {bf_data['bmi']}")
-    else:
-        st.caption(f"Deurenberg: {bf_data['deurenberg_bf']}% | BMI: {bf_data['bmi']}")
-
-    m = bf_data["measurements"]
-    st.caption(f"Cintura: {m['waist_circ_cm']}cm | Quadril: {m['hip_circ_cm']}cm | Pescoco: {m['neck_circ_cm']}cm")

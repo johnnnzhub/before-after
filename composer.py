@@ -219,9 +219,12 @@ def _draw_date_pill(photo: Image.Image, date_text: str, y_ratio: float = 0.18) -
 # ---------------------------------------------------------------------------
 def _draw_bf_banner(
     canvas: Image.Image,
-    bf_before: Optional[dict],
     bf_after: Optional[dict],
 ) -> Image.Image:
+    """Draw BF% banner at the top — only 'depois' value."""
+    if not bf_after:
+        return canvas
+
     w, h = canvas.size
     rgba = canvas.convert("RGBA")
     banner_h = max(60, int(h * 0.08))
@@ -235,64 +238,38 @@ def _draw_bf_banner(
     draw = ImageDraw.Draw(rgba)
 
     val_size = max(18, int(h * 0.032))
-    lbl_size = max(10, int(h * 0.014))
-    delta_size = max(14, int(h * 0.024))
+    cat_size = max(10, int(h * 0.014))
     val_font = _load_font(700, val_size)
-    lbl_font = _load_font(400, lbl_size)
-    delta_font = _load_font(600, delta_size)
+    cat_font = _load_font(500, cat_size)
 
     center_y = banner_h // 2
 
-    parts = []
-    if bf_before:
-        parts.append(f"{bf_before['ensemble_bf']}%")
-    if bf_before and bf_after:
-        parts.append("→")
-    if bf_after:
-        parts.append(f"{bf_after['ensemble_bf']}%")
+    # Main value
+    bf_text = f"{bf_after['ensemble_bf']}%"
+    cat_label = bf_after["category"]["label"].upper()
+    cat_color_key = bf_after["category"]["color"]
+    cat_color = BF_COLORS.get(cat_color_key, (255, 255, 255))
 
-    if bf_before and bf_after:
-        delta = bf_after["ensemble_bf"] - bf_before["ensemble_bf"]
-        delta_str = f"{delta:+.1f}%"
-        parts.append(delta_str)
+    # Measure for centering
+    val_bb = val_font.getbbox(bf_text)
+    val_w = val_bb[2] - val_bb[0]
+    val_h = val_bb[3] - val_bb[1]
 
-    if not parts:
-        return rgba.convert("RGB")
+    cat_bb = cat_font.getbbox(cat_label)
+    cat_w = cat_bb[2] - cat_bb[0]
 
-    # Measure total width for centering
-    gap = int(w * 0.025)
-    total_w = 0
-    for i, p in enumerate(parts):
-        if p == "→":
-            f = _load_font(300, val_size)
-        elif i == len(parts) - 1 and len(parts) > 2 and bf_before and bf_after:
-            f = delta_font
-        else:
-            f = val_font
-        bb = f.getbbox(p)
-        total_w += bb[2] - bb[0]
-        if i < len(parts) - 1:
-            total_w += gap
-
+    gap = int(w * 0.015)
+    total_w = val_w + gap + cat_w
     x = (w - total_w) // 2
 
-    for i, p in enumerate(parts):
-        if p == "→":
-            f = _load_font(300, val_size)
-            fill = (255, 255, 255, 100)
-        elif i == len(parts) - 1 and len(parts) > 2 and bf_before and bf_after:
-            f = delta_font
-            cat_color = BF_COLORS.get(bf_after["category"]["color"], (255, 255, 255))
-            fill = (*cat_color, 255)
-        else:
-            f = val_font
-            fill = (255, 255, 255, 235)
+    # Draw value
+    y_val = center_y - val_h // 2
+    draw.text((x, y_val), bf_text, font=val_font, fill=(255, 255, 255, 235))
 
-        bb = f.getbbox(p)
-        text_h = bb[3] - bb[1]
-        y = center_y - text_h // 2
-        draw.text((x, y), p, font=f, fill=fill)
-        x += (bb[2] - bb[0]) + gap
+    # Draw category tag next to value
+    x_cat = x + val_w + gap
+    y_cat = center_y - (cat_bb[3] - cat_bb[1]) // 2
+    draw.text((x_cat, y_cat), cat_label, font=cat_font, fill=(*cat_color, 220))
 
     return rgba.convert("RGB")
 
@@ -349,7 +326,6 @@ def compose(
     label_after: str = "Depois",
     date_before: Optional[str] = None,
     date_after: Optional[str] = None,
-    bf_before: Optional[dict] = None,
     bf_after: Optional[dict] = None,
 ) -> Image.Image:
     """Compose final output image. Returns PIL Image (RGB)."""
@@ -360,8 +336,8 @@ def compose(
     if template == OutputTemplate.STORY:
         canvas = _compose_story(before_pil, after_pil, label_before, label_after)
         canvas = _draw_watermark(canvas)
-        if bf_before or bf_after:
-            canvas = _draw_bf_banner(canvas, bf_before, bf_after)
+        if bf_after:
+            canvas = _draw_bf_banner(canvas, bf_after)
         return canvas
 
     # --- Side-by-side templates ---
@@ -454,8 +430,8 @@ def compose(
     if template != OutputTemplate.CLEAN:
         canvas = _draw_watermark(canvas)
 
-    # BF banner
-    if bf_before or bf_after:
-        canvas = _draw_bf_banner(canvas, bf_before, bf_after)
+    # BF banner (only "depois" reference on the photo)
+    if bf_after:
+        canvas = _draw_bf_banner(canvas, bf_after)
 
     return canvas

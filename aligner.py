@@ -41,7 +41,6 @@ class TorsoMetrics:
 class AlignmentResult:
     before_aligned: np.ndarray
     after_aligned: np.ndarray
-    composite: np.ndarray
     confidence: float
     landmarks_before: list | None = None
     landmarks_after: list | None = None
@@ -161,16 +160,18 @@ class BodyAligner:
         before_lm = self._detect(before_img)
         after_lm = self._detect(after_img)
 
+        _pose_tip = "\nDica: use foto de corpo inteiro, com boa iluminação e fundo limpo."
+
         if before_lm is None and after_lm is None:
-            warnings.append("Pose nao detectada em nenhuma foto. Mostrando sem alinhamento.")
+            warnings.append("Pose não detectada em nenhuma foto." + _pose_tip)
             return self._fallback_result(before_img, after_img, warnings)
 
         if before_lm is None:
-            warnings.append("Pose nao detectada na foto 'Antes'. Mostrando sem alinhamento.")
+            warnings.append("Pose não detectada na foto 'Antes'." + _pose_tip)
             return self._fallback_result(before_img, after_img, warnings)
 
         if after_lm is None:
-            warnings.append("Pose nao detectada na foto 'Depois'. Mostrando sem alinhamento.")
+            warnings.append("Pose não detectada na foto 'Depois'." + _pose_tip)
             return self._fallback_result(before_img, after_img, warnings)
 
         # Confidence check
@@ -179,7 +180,10 @@ class BodyAligner:
         avg_conf = (conf_before + conf_after) / 2
 
         if avg_conf < 0.3:
-            warnings.append(f"Confianca baixa ({avg_conf:.0%}). O alinhamento pode nao ser preciso.")
+            warnings.append(
+                f"Confiança baixa ({avg_conf:.0%}). O alinhamento pode não ser preciso.\n"
+                "Dica: corpo inteiro visível, braços afastados do corpo, roupas justas."
+            )
 
         # Torso metrics
         bh, bw = before_img.shape[:2]
@@ -189,13 +193,16 @@ class BodyAligner:
         after_metrics = self._get_torso_metrics(after_lm, aw, ah)
 
         if before_metrics is None or after_metrics is None:
-            warnings.append("Tronco nao detectado adequadamente. Mostrando sem alinhamento.")
+            warnings.append("Tronco não detectado adequadamente.\nDica: ombros e quadril devem estar visíveis na foto.")
             return self._fallback_result(before_img, after_img, warnings)
 
         # Scale check
         scale_factor = before_metrics.torso_length / after_metrics.torso_length
         if scale_factor > 2.5 or scale_factor < 0.4:
-            warnings.append(f"Diferenca de escala muito grande ({scale_factor:.1f}x). Qualidade pode ser afetada.")
+            warnings.append(
+                f"Diferença de escala muito grande ({scale_factor:.1f}x).\n"
+                "Dica: fotos tiradas a uma distância similar da câmera."
+            )
 
         # Compute and apply affine transform (align after to before's reference)
         M = self._compute_affine(after_lm, before_lm, after_img.shape, before_img.shape)
@@ -231,13 +238,9 @@ class BodyAligner:
         before_cropped = before_cropped[:target_h, :target_w]
         after_cropped = after_cropped[:target_h, :target_w]
 
-        # Create composite
-        composite = self._create_composite(before_cropped, after_cropped)
-
         return AlignmentResult(
             before_aligned=before_cropped,
             after_aligned=after_cropped,
-            composite=composite,
             confidence=avg_conf,
             landmarks_before=before_lm,
             landmarks_after=after_lm,
@@ -259,22 +262,12 @@ class BodyAligner:
         before_resized = before_resized[:h]
         after_resized = after_resized[:h]
 
-        composite = self._create_composite(before_resized, after_resized)
-
         return AlignmentResult(
             before_aligned=before_resized,
             after_aligned=after_resized,
-            composite=composite,
             confidence=0.0,
             warnings=warnings,
         )
-
-    def _create_composite(self, before: np.ndarray, after: np.ndarray, divider_width=3):
-        """Create side-by-side composite image."""
-        h = before.shape[0]
-        divider = np.full((h, divider_width, 3), 255, dtype=np.uint8)
-        return np.hstack([before, divider, after])
-
 
 def draw_landmarks_overlay(image: np.ndarray, landmarks) -> np.ndarray:
     """Draw pose landmarks on image for debugging."""

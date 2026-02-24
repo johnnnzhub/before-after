@@ -77,11 +77,17 @@ def match_brightness(source: np.ndarray, target: np.ndarray) -> np.ndarray:
 def load_image(uploaded_file) -> Optional[np.ndarray]:
     """Load image from Streamlit upload, handling HEIC and EXIF orientation."""
     try:
+        heif_available = False
         try:
             from pillow_heif import register_heif_opener
             register_heif_opener()
+            heif_available = True
         except ImportError:
             pass
+
+        name = getattr(uploaded_file, "name", "").lower()
+        if name.endswith(".heic") and not heif_available:
+            raise ValueError("HEIC_NOT_SUPPORTED")
 
         pil_img = Image.open(uploaded_file)
         pil_img = pil_img.convert("RGB")

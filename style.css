@@ -60,3 +60,8 @@ hr {
 [data-testid="stSpinner"] {
     margin: 1rem 0;
 }
+
+/* Responsive slider comparison */
+iframe[title="streamlit_image_comparison.streamlit_image_comparison"] {
+    max-width: 100% !important;
+}

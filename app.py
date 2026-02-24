@@ -30,6 +30,11 @@ st.title("Before & After")
 st.caption("by #cobaiateam")
 
 # ---------------------------------------------------------------------------
+# Debug mode (dev-only via ?debug=1)
+# ---------------------------------------------------------------------------
+debug_mode = st.query_params.get("debug", "0") == "1"
+
+# ---------------------------------------------------------------------------
 # Cached resources
 # ---------------------------------------------------------------------------
 @st.cache_resource
@@ -52,15 +57,7 @@ VIEWS = [
     {"key": "back", "label": "Costas", "expanded": False},
 ]
 FILE_TYPES = ["jpg", "jpeg", "png", "heic", "webp"]
-
-TEMPLATE_OPTIONS = {
-    "Profissional": OutputTemplate.LABELED,
-    "Limpo": OutputTemplate.CLEAN,
-    "Instagram 1:1": OutputTemplate.SQUARE,
-    "Instagram 4:5": OutputTemplate.PORTRAIT,
-    "Story 9:16": OutputTemplate.STORY,
-    "Com datas": OutputTemplate.WITH_DATES,
-}
+MAX_CACHED_ALIGNMENTS = 10
 
 
 # ---------------------------------------------------------------------------
@@ -68,64 +65,23 @@ TEMPLATE_OPTIONS = {
 # ---------------------------------------------------------------------------
 def _preview(uploaded_file, caption: str):
     """Load image safely and show preview. Returns BGR numpy or None."""
-    img = load_image(uploaded_file)
+    try:
+        img = load_image(uploaded_file)
+    except ValueError:
+        st.error("Formato HEIC não suportado neste ambiente. Converta para JPG ou PNG.")
+        return None
     if img is not None:
         st.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), caption=caption, use_container_width=True)
     return img
 
 
 # ---------------------------------------------------------------------------
-# Sidebar
-# ---------------------------------------------------------------------------
-with st.sidebar:
-    st.header("Opcoes")
-
-    template_name = st.radio("Estilo de saida", list(TEMPLATE_OPTIONS.keys()), index=0)
-    selected_template = TEMPLATE_OPTIONS[template_name]
-
-    # Labels (only for templates that show them)
-    label_before = "Antes"
-    label_after = "Depois"
-    if selected_template not in (OutputTemplate.CLEAN,):
-        label_before = st.text_input("Label antes", value="Antes")
-        label_after = st.text_input("Label depois", value="Depois")
-
-    st.divider()
-
-    # Date overlay
-    add_dates = st.toggle("Adicionar periodo", value=(selected_template == OutputTemplate.WITH_DATES))
-    date_before = None
-    date_after = None
-    if add_dates:
-        date_before = st.text_input("Data antes", placeholder="Jan 2025")
-        date_after = st.text_input("Data depois", placeholder="Fev 2026")
-        if selected_template != OutputTemplate.WITH_DATES:
-            selected_template = OutputTemplate.WITH_DATES
-
-    # Brightness matching
-    color_match = st.toggle("Equalizar brilho", value=True,
-                            help="Equaliza luminosidade entre as fotos")
-
-    st.divider()
-
-    # Advanced
-    with st.expander("Avancado"):
-        multi_view = st.toggle("3 angulos (Frente/Lateral/Costas)", value=False)
-        bf_enabled = st.toggle("Estimar % gordura", value=False)
-        bf_sex = "M"
-        bf_age = 30
-        bf_height = 175.0
-        bf_weight = 75.0
-        if bf_enabled:
-            bf_sex = st.selectbox("Sexo", ["M", "F"])
-            bf_age = st.number_input("Idade", min_value=10, max_value=100, value=30)
-            bf_height = st.number_input("Altura (cm)", min_value=100.0, max_value=250.0, value=175.0, step=0.5)
-            bf_weight = st.number_input("Peso (kg)", min_value=30.0, max_value=250.0, value=75.0, step=0.5)
-
-# ---------------------------------------------------------------------------
-# Upload section
+# Upload section (always visible)
 # ---------------------------------------------------------------------------
 st.subheader("Envie suas fotos")
+
+multi_view = st.toggle("3 ângulos (Frente/Lateral/Costas)", value=False,
+                       help="Compare frente, lateral e costas")
 
 uploads = {}
 
@@ -134,10 +90,12 @@ if multi_view:
         with st.expander(f"📷 {view['label']}", expanded=view["expanded"]):
             c1, c2 = st.columns(2)
             with c1:
-                bf = st.file_uploader("Antes", type=FILE_TYPES, key=f"{view['key']}_before")
+                bf = st.file_uploader("Antes", type=FILE_TYPES, key=f"{view['key']}_before",
+                                      help="JPG, PNG ou HEIC. Máximo 20MB.")
                 bf_img = _preview(bf, "Antes") if bf else None
             with c2:
-                af = st.file_uploader("Depois", type=FILE_TYPES, key=f"{view['key']}_after")
+                af = st.file_uploader("Depois", type=FILE_TYPES, key=f"{view['key']}_after",
+                                      help="JPG, PNG ou HEIC. Máximo 20MB.")
                 af_img = _preview(af, "Depois") if af else None
             if bf_img is not None and af_img is not None:
                 uploads[view["key"]] = {
@@ -148,10 +106,12 @@ if multi_view:
 else:
     c1, c2 = st.columns(2)
     with c1:
-        before_file = st.file_uploader("Antes", type=FILE_TYPES, key="single_before")
+        before_file = st.file_uploader("Antes", type=FILE_TYPES, key="single_before",
+                                       help="JPG, PNG ou HEIC. Máximo 20MB.")
         before_img_preview = _preview(before_file, "Antes") if before_file else None
     with c2:
-        after_file = st.file_uploader("Depois", type=FILE_TYPES, key="single_after")
+        after_file = st.file_uploader("Depois", type=FILE_TYPES, key="single_after",
+                                      help="JPG, PNG ou HEIC. Máximo 20MB.")
         after_img_preview = _preview(after_file, "Depois") if after_file else None
     if before_img_preview is not None and after_img_preview is not None:
         uploads["front"] = {
@@ -161,12 +121,53 @@ else:
         }
 
 # ---------------------------------------------------------------------------
-# Auto-process (with session_state cache)
+# Stop here if no uploads — sidebar won't render yet
 # ---------------------------------------------------------------------------
 if not uploads:
-    st.info("Envie pelo menos 1 par de fotos (antes + depois).")
+    st.info("Envie um par de fotos para começar.")
     st.stop()
 
+# ---------------------------------------------------------------------------
+# Sidebar (appears only after upload)
+# ---------------------------------------------------------------------------
+selected_template = OutputTemplate.LABELED
+
+with st.sidebar:
+    st.header("Opções")
+
+    label_before = st.text_input("Label antes", value="Antes")
+    label_after = st.text_input("Label depois", value="Depois")
+
+    st.divider()
+
+    add_dates = st.toggle("Adicionar período", value=False)
+    date_before = None
+    date_after = None
+    if add_dates:
+        date_before = st.text_input("Data antes", placeholder="Jan 2025")
+        date_after = st.text_input("Data depois", placeholder="Fev 2026")
+        selected_template = OutputTemplate.WITH_DATES
+
+    color_match = st.toggle("Equalizar brilho", value=True,
+                            help="Equaliza luminosidade entre as fotos")
+
+    st.divider()
+
+    bf_enabled = st.toggle("Estimar % gordura corporal", value=False,
+                           help="Estimativa Navy + Deurenberg (~4-6% precisão)")
+    bf_sex = "M"
+    bf_age = 30
+    bf_height = 175.0
+    bf_weight = 75.0
+    if bf_enabled:
+        bf_sex = st.selectbox("Sexo", ["M", "F"])
+        bf_age = st.number_input("Idade", min_value=10, max_value=100, value=30)
+        bf_height = st.number_input("Altura (cm)", min_value=100.0, max_value=250.0, value=175.0, step=0.5)
+        bf_weight = st.number_input("Peso (kg)", min_value=30.0, max_value=250.0, value=75.0, step=0.5)
+
+# ---------------------------------------------------------------------------
+# Auto-process (with session_state cache)
+# ---------------------------------------------------------------------------
 st.divider()
 
 aligner = _get_aligner()
@@ -201,6 +202,12 @@ for view_key, data in uploads.items():
         st.session_state[full_key] = entry
         results[view_key] = entry
 
+    # Session state LRU cleanup
+    align_keys = [k for k in st.session_state if k.startswith("align_")]
+    if len(align_keys) > MAX_CACHED_ALIGNMENTS:
+        for old_key in align_keys[:-MAX_CACHED_ALIGNMENTS]:
+            del st.session_state[old_key]
+
 if not results:
     st.stop()
 
@@ -227,9 +234,14 @@ for view_key, container in containers.items():
         for w in result.warnings:
             st.warning(w)
 
-        # Confidence (subtle — only show if low)
-        if 0 < result.confidence < 0.4:
-            st.caption(f"Confianca do alinhamento: {result.confidence:.0%} (baixa)")
+        # Confidence indicator (unified)
+        if result.confidence > 0:
+            if result.confidence >= 0.7:
+                st.caption(f"Alinhamento: {result.confidence:.0%}")
+            elif result.confidence >= 0.4:
+                st.caption(f"Alinhamento: {result.confidence:.0%} (moderado)")
+            else:
+                st.caption(f"Alinhamento: {result.confidence:.0%} (baixo)")
 
         # --- Slider comparison ---
         before_rgb = cv2.cvtColor(result.before_aligned, cv2.COLOR_BGR2RGB)
@@ -242,12 +254,9 @@ for view_key, container in containers.items():
             label2=label_after,
             starting_position=50,
             show_labels=True,
-            width=700,
         )
 
         # --- Compose & download ---
-        st.subheader("Baixar")
-
         # Body fat data (if enabled) — only "depois" goes on the photo
         bf_data_before = None
         bf_data_after = None
@@ -297,15 +306,16 @@ for view_key, container in containers.items():
                     bf_data_before, bf_data_after, bf_sex,
                 )
 
-        # --- Debug (expandable) ---
-        with st.expander("Debug (landmarks)"):
-            if result.landmarks_before is not None and result.landmarks_after is not None:
-                d1, d2 = st.columns(2)
-                with d1:
-                    ov = draw_landmarks_overlay(before_img, result.landmarks_before)
-                    st.image(cv2.cvtColor(ov, cv2.COLOR_BGR2RGB), caption="Antes", use_container_width=True)
-                with d2:
-                    ov = draw_landmarks_overlay(after_img, result.landmarks_after)
-                    st.image(cv2.cvtColor(ov, cv2.COLOR_BGR2RGB), caption="Depois", use_container_width=True)
-            else:
-                st.info("Landmarks nao disponiveis (pose nao detectada).")
+        # --- Debug (dev-only via ?debug=1) ---
+        if debug_mode:
+            with st.expander("Debug (landmarks)"):
+                if result.landmarks_before is not None and result.landmarks_after is not None:
+                    d1, d2 = st.columns(2)
+                    with d1:
+                        ov = draw_landmarks_overlay(before_img, result.landmarks_before)
+                        st.image(cv2.cvtColor(ov, cv2.COLOR_BGR2RGB), caption="Antes", use_container_width=True)
+                    with d2:
+                        ov = draw_landmarks_overlay(after_img, result.landmarks_after)
+                        st.image(cv2.cvtColor(ov, cv2.COLOR_BGR2RGB), caption="Depois", use_container_width=True)
+                else:
+                    st.info("Landmarks não disponíveis (pose não detectada).")

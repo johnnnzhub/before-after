@@ -24,7 +24,7 @@ def render_bf_card(label: str, bf_data: dict):
         st.caption(f"Deurenberg: {bf_data['deurenberg_bf']}% | BMI: {bf_data['bmi']}")
 
     m = bf_data["measurements"]
-    st.caption(f"Cintura: {m['waist_circ_cm']}cm | Quadril: {m['hip_circ_cm']}cm | Pescoco: {m['neck_circ_cm']}cm")
+    st.caption(f"Cintura: {m['waist_circ_cm']}cm | Quadril: {m['hip_circ_cm']}cm | Pescoço: {m['neck_circ_cm']}cm")
 
 
 def render_bodyfat_section(result, before_img, after_img, bf_before, bf_after, sex: str):
@@ -43,14 +43,14 @@ def render_bodyfat_section(result, before_img, after_img, bf_before, bf_after, s
         delta = bf_after["ensemble_bf"] - bf_before["ensemble_bf"]
         delta_str = f"{delta:+.1f}%"
         if delta < 0:
-            st.success(f"Variacao: {delta_str} de gordura corporal")
+            st.success(f"Variação: {delta_str} de gordura corporal")
         elif delta > 0:
-            st.warning(f"Variacao: {delta_str} de gordura corporal")
+            st.warning(f"Variação: {delta_str} de gordura corporal")
         else:
-            st.info("Sem variacao detectada")
+            st.info("Sem variação detectada")
 
     # Measurement overlay
-    st.caption("Medicoes")
+    st.caption("Medições")
     bh, bw = before_img.shape[:2]
     ah, aw = after_img.shape[:2]
     m1, m2 = st.columns(2)
@@ -64,11 +64,11 @@ def render_bodyfat_section(result, before_img, after_img, bf_before, bf_after, s
             st.image(cv2.cvtColor(ov, cv2.COLOR_BGR2RGB), caption="Depois", use_container_width=True)
 
     # Reference table
-    with st.expander("Tabela de referencia"):
+    with st.expander("Tabela de referência"):
         ref = BF_REFERENCE_TABLE.get(sex, BF_REFERENCE_TABLE["M"])
         st.table({"Categoria": [r[0] for r in ref], "Faixa": [r[1] for r in ref]})
 
     st.caption(
-        "Estimativa baseada em formulas antropometricas (Navy + Deurenberg). "
-        "Precisao: ~4-6% vs DEXA. Para avaliacao clinica, consulte um profissional."
+        "Estimativa baseada em fórmulas antropométricas (Navy + Deurenberg). "
+        "Precisão: ~4-6% vs DEXA. Para avaliação clínica, consulte um profissional."
     )
